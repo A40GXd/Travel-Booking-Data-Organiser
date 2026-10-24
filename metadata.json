@@ -1,0 +1,6 @@
+{
+  "name": "Wanderlore - Neo-Utility Itinerary & Tactical HUD",
+  "description": "Tactical flight HUD, smart PNR decoding, multi-modal itinerary stream, data matrix, and expense splitter for modern expeditions.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
