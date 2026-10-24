@@ -1,9 +1,10 @@
 import { ItineraryEvent, ExpenseItem, ReadinessItem } from '../types';
 import { INITIAL_EVENTS, INITIAL_EXPENSES, INITIAL_READINESS } from '../data/initialData';
 
-const BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+// When deployed on Vercel, BASE_URL is empty ('') so calls use same-site relative '/api' routes
+const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 
-// Local fallback storage keys for standalone AI Studio runtime
+// Local fallback storage keys for offline or standalone preview
 const STORAGE_EVENTS_KEY = 'wanderlore_events_v2';
 const STORAGE_EXPENSES_KEY = 'wanderlore_expenses_v2';
 const STORAGE_READINESS_KEY = 'wanderlore_readiness_v2';
@@ -45,30 +46,36 @@ function saveLocalExpenses(expenses: ExpenseItem[]) {
 }
 
 export const apiService = {
-  async checkHealth(): Promise<{ status: string; service?: string }> {
-    if (!BASE_URL) {
-      return { status: 'ok', service: 'wanderlore-client-engine' };
-    }
+  async checkHealth(): Promise<{ status: string; service?: string; environment?: string }> {
     try {
-      const res = await fetch(`${BASE_URL}/api/health`, { signal: AbortSignal.timeout(2500) });
-      if (res.ok) return await res.json();
+      const res = await fetch(`${BASE_URL}/api/health`, {
+        signal: AbortSignal.timeout(3000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        return {
+          status: 'ok',
+          service: data.app || 'Vercel Python Serverless',
+          environment: data.environment || 'production',
+        };
+      }
     } catch {
-      // Backend not running, fallback
+      // In offline / preview sandbox, report client-fallback
     }
-    return { status: 'ok', service: 'wanderlore-client-engine' };
+    return { status: 'ok', service: 'wanderlore-client-engine', environment: 'client-preview' };
   },
 
   async getEvents(): Promise<ItineraryEvent[]> {
-    if (BASE_URL) {
-      try {
-        const res = await fetch(`${BASE_URL}/api/itinerary`, { signal: AbortSignal.timeout(3000) });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data) && data.length > 0) return data;
-        }
-      } catch (err) {
-        console.info('Backend unreachable, using local store', err);
+    try {
+      const res = await fetch(`${BASE_URL}/api/itinerary`, {
+        signal: AbortSignal.timeout(3500),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data) && data.length > 0) return data;
       }
+    } catch (err) {
+      console.info('Serverless API call failed or unavailable, using local store', err);
     }
     return getLocalEvents();
   },
@@ -77,21 +84,24 @@ export const apiService = {
     const id = `event-${Date.now()}`;
     const newEvent: ItineraryEvent = { ...eventData, id };
 
-    if (BASE_URL) {
-      try {
-        const res = await fetch(`${BASE_URL}/api/itinerary`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(eventData),
-          signal: AbortSignal.timeout(3500),
-        });
-        if (res.ok) {
-          const resJson = await res.json();
-          if (resJson.event) return resJson.event;
+    try {
+      const res = await fetch(`${BASE_URL}/api/itinerary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(eventData),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const resJson = await res.json();
+        if (resJson.event) {
+          // Sync locally as well
+          const current = getLocalEvents();
+          saveLocalEvents([resJson.event, ...current]);
+          return resJson.event;
         }
-      } catch (e) {
-        console.warn('Backend POST failed, persisting locally', e);
       }
+    } catch (e) {
+      console.warn('Backend POST failed, persisting locally', e);
     }
 
     const current = getLocalEvents();
@@ -101,12 +111,13 @@ export const apiService = {
   },
 
   async deleteEvent(eventId: string): Promise<boolean> {
-    if (BASE_URL) {
-      try {
-        await fetch(`${BASE_URL}/api/itinerary/${eventId}`, { method: 'DELETE' });
-      } catch (e) {
-        console.warn('Backend DELETE failed', e);
-      }
+    try {
+      await fetch(`${BASE_URL}/api/itinerary/${eventId}`, {
+        method: 'DELETE',
+        signal: AbortSignal.timeout(3000),
+      });
+    } catch (e) {
+      console.warn('Backend DELETE failed', e);
     }
     const current = getLocalEvents();
     const filtered = current.filter((e) => e.id !== eventId);
@@ -115,24 +126,28 @@ export const apiService = {
   },
 
   async parsePNR(rawText: string, carrierHint?: string): Promise<{ event: ItineraryEvent; pnr: string }> {
-    if (BASE_URL) {
-      try {
-        const res = await fetch(`${BASE_URL}/api/parse-pnr`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ raw_text: rawText, carrier_hint: carrierHint }),
-          signal: AbortSignal.timeout(4000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          return {
-            event: { ...data.parsed_item, id: `parsed-${Date.now()}` },
-            pnr: data.extracted_pnr,
-          };
-        }
-      } catch (e) {
-        console.warn('Remote PNR parsing failed, falling back to local regex engine', e);
+    try {
+      const res = await fetch(`${BASE_URL}/api/parse-pnr`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ raw_text: rawText, carrier_hint: carrierHint }),
+        signal: AbortSignal.timeout(4500),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const parsedEvent: ItineraryEvent = {
+          ...data.parsed_item,
+          id: `parsed-${Date.now()}`,
+        };
+        const current = getLocalEvents();
+        saveLocalEvents([parsedEvent, ...current]);
+        return {
+          event: parsedEvent,
+          pnr: data.extracted_pnr,
+        };
       }
+    } catch (e) {
+      console.warn('Remote PNR parsing failed, falling back to client-side engine', e);
     }
 
     // Client-side regex parser fallback
@@ -195,16 +210,16 @@ export const apiService = {
   },
 
   async getExpenses(): Promise<ExpenseItem[]> {
-    if (BASE_URL) {
-      try {
-        const res = await fetch(`${BASE_URL}/api/expenses`, { signal: AbortSignal.timeout(3000) });
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.expenses)) return data.expenses;
-        }
-      } catch (e) {
-        console.warn('Failed to load remote expenses', e);
+    try {
+      const res = await fetch(`${BASE_URL}/api/expenses`, {
+        signal: AbortSignal.timeout(3500),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.expenses)) return data.expenses;
       }
+    } catch (e) {
+      console.warn('Failed to load remote expenses', e);
     }
     return getLocalExpenses();
   },
@@ -216,20 +231,23 @@ export const apiService = {
       date: new Date().toISOString().split('T')[0],
     };
 
-    if (BASE_URL) {
-      try {
-        const res = await fetch(`${BASE_URL}/api/expenses`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(expense),
-        });
-        if (res.ok) {
-          const json = await res.json();
-          if (json.expense) return json.expense;
+    try {
+      const res = await fetch(`${BASE_URL}/api/expenses`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(expense),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const json = await res.json();
+        if (json.expense) {
+          const current = getLocalExpenses();
+          saveLocalExpenses([json.expense, ...current]);
+          return json.expense;
         }
-      } catch (e) {
-        console.warn('Remote expense POST failed', e);
       }
+    } catch (e) {
+      console.warn('Remote expense POST failed, saving locally', e);
     }
 
     const current = getLocalExpenses();
@@ -257,16 +275,15 @@ export const apiService = {
       console.warn('Storage save error', e);
     }
 
-    if (BASE_URL) {
-      try {
-        await fetch(`${BASE_URL}/api/readiness/toggle`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ task_id: id, completed }),
-        });
-      } catch {
-        // quiet
-      }
+    try {
+      await fetch(`${BASE_URL}/api/readiness/toggle`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ task_id: id, completed }),
+        signal: AbortSignal.timeout(2500),
+      });
+    } catch {
+      // quiet
     }
     return updated;
   },
