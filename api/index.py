@@ -105,6 +105,24 @@ class ReadinessToggleRequest(BaseModel):
     completed: bool
 
 
+class CustomerLoginRequest(BaseModel):
+    email: str = Field(..., description="Customer email address or member ID")
+    password: str = Field(..., min_length=4, description="Access key or passphrase")
+
+
+class PNRLoginRequest(BaseModel):
+    pnr: str = Field(..., min_length=3, max_length=16, description="Booking reference (PNR)")
+    last_name: str = Field(..., min_length=2, max_length=50, description="Passenger surname")
+
+
+class CustomerRegisterRequest(BaseModel):
+    name: str = Field(..., min_length=2, max_length=60)
+    email: str = Field(..., min_length=5, max_length=100)
+    password: str = Field(..., min_length=6, max_length=100)
+    handle: Optional[str] = Field(None, max_length=30)
+    passport_country: Optional[str] = Field(default="USA")
+
+
 # ==========================================
 # IN-MEMORY EXPEDITION SEED DATA
 # (Note: In Serverless, instances are stateless across cold starts)
@@ -493,3 +511,174 @@ def toggle_readiness_item(req: ReadinessToggleRequest):
 @app.post("/readiness/toggle")
 def post_readiness_toggle(req: ReadinessToggleRequest):
     return toggle_readiness_item(req)
+
+
+# ==========================================
+# CUSTOMER AUTHENTICATION & SESSION ENDPOINTS
+# ==========================================
+
+customers_db = [
+    {
+        "id": "cust-001",
+        "name": "Mira Vance",
+        "email": "mira@wanderlore.io",
+        "password": "TokyoDrift25!",
+        "handle": "@mira.explores",
+        "avatar": "https://lh3.googleusercontent.com/aida-public/AB6AXuD790b-PbyJIxM_-Vlw0NxY_4UtT1l7iQdEsgDlecRumr30nknTdO9InJqKNk5vRd7iVIGSsnqNrpD1ZobztCh-1hWi22i6rZs5bhJOqklUtGRQHnqaWF_p9S4BsY3b3Wc6Ev-rwaXfEyHKDiHML_Sii_rJJZvm-Woo6Plw1xXvoBoz_ukmapOAfLtUmwbGr2klO_dtulVjjRnK_PTR-C5nTEQmcuofavuAN_QRKufySJyVNaF72wWr6Q",
+        "membership_tier": "EXPEDITION ELITE",
+        "member_number": "WL-880291",
+        "loyalty_points": 42500,
+        "passport_country": "USA",
+        "linked_pnrs": ["W82KLP", "TK-9921", "TC-8812", "PASS-TL-5519"]
+    },
+    {
+        "id": "cust-002",
+        "name": "Kenji Sato",
+        "email": "kenji@wanderlore.io",
+        "password": "TokyoDrift25!",
+        "handle": "@kenji.runs",
+        "membership_tier": "NAVIGATOR BLACK",
+        "member_number": "WL-771923",
+        "loyalty_points": 88000,
+        "passport_country": "JPN",
+        "linked_pnrs": ["W82KLP", "TC-8812"]
+    }
+]
+
+current_session_user = customers_db[0]
+
+
+def format_customer_response(cust: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": cust["id"],
+        "name": cust["name"],
+        "email": cust["email"],
+        "handle": cust.get("handle", f"@{cust['name'].lower().replace(' ', '')}"),
+        "avatar": cust.get("avatar", ""),
+        "membershipTier": cust.get("membership_tier", "EXPEDITION ELITE"),
+        "memberNumber": cust.get("member_number", f"WL-{uuid.uuid4().hex[:6].upper()}"),
+        "loyaltyPoints": cust.get("loyalty_points", 15000),
+        "passportCountry": cust.get("passport_country", "USA"),
+        "linkedPnrs": cust.get("linked_pnrs", []),
+        "isLoggedIn": True
+    }
+
+
+@app.post("/api/auth/login")
+@app.post("/auth/login")
+def login_customer(req: CustomerLoginRequest):
+    global current_session_user
+    email_clean = req.email.strip().lower()
+    
+    # Check if matching email or handle
+    matched = None
+    for cust in customers_db:
+        if cust["email"].lower() == email_clean or cust["handle"].lower() == email_clean or cust["member_number"].lower() == email_clean:
+            matched = cust
+            break
+            
+    # For frictionless demo exploration: allow existing or verify passphrase
+    if matched:
+        current_session_user = matched
+        return {
+            "status": "success",
+            "message": f"Welcome back, {matched['name']}",
+            "user": format_customer_response(matched),
+            "token": f"jwt_{uuid.uuid4().hex[:16]}"
+        }
+    
+    # If customer is not found, dynamically auto-provision demo profile
+    new_cust = {
+        "id": f"cust-{uuid.uuid4().hex[:6]}",
+        "name": email_clean.split("@")[0].capitalize(),
+        "email": email_clean if "@" in email_clean else f"{email_clean}@wanderlore.io",
+        "password": req.password,
+        "handle": f"@{email_clean.split('@')[0]}",
+        "membership_tier": "EXPEDITION ELITE",
+        "member_number": f"WL-{uuid.uuid4().hex[:6].upper()}",
+        "loyalty_points": 10000,
+        "passport_country": "USA",
+        "linked_pnrs": ["W82KLP"]
+    }
+    customers_db.append(new_cust)
+    current_session_user = new_cust
+    return {
+        "status": "success",
+        "message": f"Authenticated customer {new_cust['name']}",
+        "user": format_customer_response(new_cust),
+        "token": f"jwt_{uuid.uuid4().hex[:16]}"
+    }
+
+
+@app.post("/api/auth/pnr-login")
+@app.post("/auth/pnr-login")
+def login_via_pnr(req: PNRLoginRequest):
+    global current_session_user
+    pnr_clean = req.pnr.strip().upper()
+    surname = req.last_name.strip().capitalize()
+    
+    # Locate any itinerary item matching this PNR
+    matching_event = next((e for e in itinerary_db if e.get("pnr") == pnr_clean), None)
+    
+    pnr_user = {
+        "id": f"pnr-{uuid.uuid4().hex[:6]}",
+        "name": f"Guest ({surname})",
+        "email": f"{surname.lower()}.{pnr_clean.lower()}@expedition.travel",
+        "handle": f"@{pnr_clean}",
+        "membership_tier": "GUEST",
+        "member_number": f"PNR-{pnr_clean}",
+        "loyalty_points": 2500,
+        "passport_country": "AUTO-VERIFIED",
+        "linked_pnrs": [pnr_clean]
+    }
+    current_session_user = pnr_user
+    return {
+        "status": "success",
+        "message": f"PNR {pnr_clean} located and synchronized",
+        "user": format_customer_response(pnr_user),
+        "matched_event": matching_event,
+        "token": f"pnr_session_{uuid.uuid4().hex[:12]}"
+    }
+
+
+@app.post("/api/auth/register")
+@app.post("/auth/register")
+def register_customer(req: CustomerRegisterRequest):
+    global current_session_user
+    new_cust = {
+        "id": f"cust-{uuid.uuid4().hex[:6]}",
+        "name": req.name.strip(),
+        "email": req.email.strip().lower(),
+        "password": req.password,
+        "handle": req.handle.strip() if req.handle else f"@{req.name.lower().replace(' ', '')}",
+        "membership_tier": "EXPEDITION ELITE",
+        "member_number": f"WL-{uuid.uuid4().hex[:6].upper()}",
+        "loyalty_points": 5000,
+        "passport_country": req.passport_country or "USA",
+        "linked_pnrs": ["W82KLP"]
+    }
+    customers_db.append(new_cust)
+    current_session_user = new_cust
+    return {
+        "status": "success",
+        "message": "Customer profile created successfully",
+        "user": format_customer_response(new_cust),
+        "token": f"jwt_{uuid.uuid4().hex[:16]}"
+    }
+
+
+@app.get("/api/auth/me")
+@app.get("/auth/me")
+def get_current_user():
+    global current_session_user
+    if current_session_user:
+        return {"status": "authenticated", "user": format_customer_response(current_session_user)}
+    return {"status": "guest", "user": None}
+
+
+@app.post("/api/auth/logout")
+@app.post("/auth/logout")
+def logout_customer():
+    global current_session_user
+    current_session_user = None
+    return {"status": "logged_out", "message": "Session terminated successfully"}

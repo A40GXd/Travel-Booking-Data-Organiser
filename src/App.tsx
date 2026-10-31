@@ -14,9 +14,23 @@ import { SmartImportModal } from './components/SmartImportModal';
 import { MobilePassbookModal } from './components/MobilePassbookModal';
 import { SearchModal } from './components/SearchModal';
 import { NotificationDrawer } from './components/NotificationDrawer';
+import { CustomerLoginModal } from './components/CustomerLoginModal';
 import { apiService } from './services/api';
-import { ItineraryEvent, ExpenseItem, ReadinessItem, ActiveNavTab, ViewMode } from './types';
-import { INITIAL_EVENTS, INITIAL_EXPENSES, INITIAL_READINESS } from './data/initialData';
+import {
+  ItineraryEvent,
+  ExpenseItem,
+  ReadinessItem,
+  ActiveNavTab,
+  ViewMode,
+  CustomerUser,
+} from './types';
+import {
+  INITIAL_EVENTS,
+  INITIAL_EXPENSES,
+  INITIAL_READINESS,
+  DEFAULT_CUSTOMER_USER,
+  DEMO_ACCOUNTS,
+} from './data/initialData';
 
 export default function App() {
   // Navigation & View Mode State
@@ -24,6 +38,10 @@ export default function App() {
   const [currentViewMode, setCurrentViewMode] = useState<ViewMode>('chrono');
   const [selectedDay, setSelectedDay] = useState<number | null>(null);
   const [selectedEventType, setSelectedEventType] = useState<string>('flight');
+
+  // Customer Authentication & User State
+  const [currentUser, setCurrentUser] = useState<CustomerUser>(DEFAULT_CUSTOMER_USER);
+  const [isLoginModalOpen, setIsLoginModalOpen] = useState(false);
 
   // Data Stores
   const [events, setEvents] = useState<ItineraryEvent[]>(INITIAL_EVENTS);
@@ -49,23 +67,26 @@ export default function App() {
     }, 3200);
   };
 
-  // Load Initial Data & Health Status
+  // Load Initial Data & Health Status & Customer Session
   useEffect(() => {
     let isMounted = true;
     const initData = async () => {
       try {
-        const [health, loadedEvents, loadedExpenses, loadedReadiness] = await Promise.all([
-          apiService.checkHealth(),
-          apiService.getEvents(),
-          apiService.getExpenses(),
-          apiService.getReadiness(),
-        ]);
+        const [health, loadedEvents, loadedExpenses, loadedReadiness, userSession] =
+          await Promise.all([
+            apiService.checkHealth(),
+            apiService.getEvents(),
+            apiService.getExpenses(),
+            apiService.getReadiness(),
+            apiService.getCurrentUser(),
+          ]);
 
         if (isMounted) {
           setBackendOnline(health.status === 'ok');
           if (loadedEvents.length > 0) setEvents(loadedEvents);
           if (loadedExpenses.length > 0) setExpenses(loadedExpenses);
           if (loadedReadiness.length > 0) setReadiness(loadedReadiness);
+          if (userSession) setCurrentUser(userSession);
         }
       } catch (err) {
         console.warn('Backend synchronization notice:', err);
@@ -76,6 +97,15 @@ export default function App() {
     return () => {
       isMounted = false;
     };
+  }, []);
+
+  // Google Maps Platform Quota Defense State
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+
+  useEffect(() => {
+    const handleQuota = () => setQuotaExceeded(true);
+    window.addEventListener('gmp-quota-exceeded', handleQuota);
+    return () => window.removeEventListener('gmp-quota-exceeded', handleQuota);
   }, []);
 
   // Keyboard shortcut listener for ⌘K
@@ -140,8 +170,62 @@ export default function App() {
     showToast(`AI-Parser decoded & committed: ${parsedEvent.title}`);
   };
 
+  // Customer Auth Handlers
+  const handleCustomerLogin = async (email: string, pass: string) => {
+    const user = await apiService.loginCustomer(email, pass);
+    setCurrentUser(user);
+    showToast(`Access granted: ${user.name} [${user.membershipTier}]`);
+  };
+
+  const handleCustomerPNRLogin = async (pnr: string, lastName: string) => {
+    const user = await apiService.loginViaPNR(pnr, lastName);
+    setCurrentUser(user);
+    showToast(`Manifest unlocked for PNR: ${pnr} · ${lastName}`);
+  };
+
+  const handleCustomerRegister = async (
+    name: string,
+    email: string,
+    pass: string,
+    handle?: string
+  ) => {
+    const user = await apiService.registerCustomer(name, email, pass, handle);
+    setCurrentUser(user);
+    showToast(`Welcome ${name}! Expedition Elite tier activated.`);
+  };
+
+  const handleCustomerLogout = async () => {
+    const guest = await apiService.logoutCustomer();
+    setCurrentUser(guest);
+    showToast('Logged out. Switched to Guest Mode.');
+  };
+
+  const handleSelectAccount = async (account: (typeof DEMO_ACCOUNTS)[0]) => {
+    const user = await apiService.loginCustomer(account.email, account.password);
+    setCurrentUser(user);
+    showToast(`Active traveler switched to ${user.name}`);
+  };
+
   return (
     <div className="bg-[#111317] font-['DM_Sans'] text-[#e2e2e8] min-h-screen selection:bg-[#c3f400] selection:text-[#161e00]">
+      {/* Google Maps Platform Quota Exceeded Sticky Notice */}
+      {quotaExceeded && (
+        <div className="bg-amber-50 border-b border-amber-200 text-amber-900 px-4 py-2.5 text-xs md:text-sm text-center sticky top-0 z-50 shadow-sm">
+          <span>
+            Google Maps Platform quota reached. If you are the app owner, visit{' '}
+            <a
+              href="https://developers.google.com/maps/ai/ai-studio?utm_campaign=gmp_mcp_codeassist_v1_aistudio#quota_exceeded_errors"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline font-semibold text-amber-950 hover:text-amber-800"
+            >
+              maps developer site
+            </a>{' '}
+            for instructions to update your account.
+          </span>
+        </div>
+      )}
+
       {/* Toast Notification Pop-up */}
       {toastMessage && (
         <div className="fixed bottom-6 right-6 z-50 bg-[#1e2024] border border-[#c3f400] text-[#e2e2e8] px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3 animate-in fade-in slide-in-from-bottom duration-200">
@@ -159,6 +243,8 @@ export default function App() {
         decodedCount={events.length}
         totalPnrs={11}
         backendOnline={backendOnline}
+        currentUser={currentUser}
+        onOpenLogin={() => setIsLoginModalOpen(true)}
       />
 
       {/* Main Content Area */}
@@ -170,6 +256,10 @@ export default function App() {
           onOpenSmartImport={() => setIsSmartImportOpen(true)}
           onOpenNotifications={() => setIsNotificationsOpen(true)}
           unreadNotificationsCount={2}
+          currentUser={currentUser}
+          onOpenLogin={() => setIsLoginModalOpen(true)}
+          onLogout={handleCustomerLogout}
+          onSelectAccount={handleSelectAccount}
         />
 
         {/* Page Content */}
@@ -211,7 +301,7 @@ export default function App() {
                   )}
 
                   {currentViewMode === 'map' && (
-                    <MapSplitView onSelectEvent={handleSelectEvent} />
+                    <MapSplitView onSelectEvent={handleSelectEvent} events={events} />
                   )}
                 </div>
 
@@ -264,6 +354,15 @@ export default function App() {
       </div>
 
       {/* Global Interactive Modals */}
+      <CustomerLoginModal
+        isOpen={isLoginModalOpen}
+        onClose={() => setIsLoginModalOpen(false)}
+        onLogin={handleCustomerLogin}
+        onPNRLogin={handleCustomerPNRLogin}
+        onRegister={handleCustomerRegister}
+        currentUser={currentUser}
+      />
+
       <AddEventModal
         isOpen={isAddEventOpen}
         onClose={() => setIsAddEventOpen(false)}

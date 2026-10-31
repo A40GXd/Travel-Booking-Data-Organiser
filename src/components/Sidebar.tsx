@@ -1,5 +1,5 @@
 import React from 'react';
-import { ActiveNavTab } from '../types';
+import { ActiveNavTab, CustomerUser } from '../types';
 
 interface SidebarProps {
   activeNav: ActiveNavTab;
@@ -9,6 +9,8 @@ interface SidebarProps {
   decodedCount: number;
   totalPnrs: number;
   backendOnline: boolean;
+  currentUser?: CustomerUser;
+  onOpenLogin: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -19,6 +21,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   decodedCount = 9,
   totalPnrs = 11,
   backendOnline = true,
+  currentUser,
+  onOpenLogin,
 }) => {
   const navItems: { id: ActiveNavTab; label: string; icon: string }[] = [
     { id: 'command-center', label: 'Command Center', icon: 'grid_view' },
@@ -102,8 +106,74 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
 
-        {/* Sync Status / Telemetry Footer */}
-        <div className="px-6 flex flex-col gap-2">
+        {/* Customer Account Pill + Sync Status Footer */}
+        <div className="px-4 flex flex-col gap-3">
+          {/* Customer Login / Active User Bento Card */}
+          <div className="p-3.5 rounded-2xl bg-[#16181d] border border-[#282a2e] flex flex-col gap-2.5">
+            <div className="flex items-center justify-between">
+              <span className="font-['Space_Mono'] text-[10px] text-[#c4c9ac] uppercase tracking-wider">
+                CUSTOMER PORTAL
+              </span>
+              <span className="w-2 h-2 rounded-full bg-[#c3f400]"></span>
+            </div>
+
+            {currentUser?.isLoggedIn ? (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-2.5">
+                  {currentUser.avatar ? (
+                    <img
+                      src={currentUser.avatar}
+                      alt={currentUser.name}
+                      className="w-8 h-8 rounded-full object-cover ring-1 ring-[#c3f400]"
+                    />
+                  ) : (
+                    <div className="w-8 h-8 rounded-full bg-[#282a2e] text-[#c3f400] font-['Space_Grotesk'] text-xs font-bold flex items-center justify-center ring-1 ring-[#c3f400]">
+                      {currentUser.name.charAt(0)}
+                    </div>
+                  )}
+                  <div className="flex flex-col min-w-0">
+                    <span className="font-['DM_Sans'] text-xs font-bold text-[#e2e2e8] truncate">
+                      {currentUser.name}
+                    </span>
+                    <span className="font-['Space_Mono'] text-[10px] text-[#c3f400] truncate">
+                      {currentUser.membershipTier}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenLogin();
+                    onCloseMobile();
+                  }}
+                  className="w-full py-1.5 px-2 rounded-lg bg-[#282a2e] hover:bg-[#333539] text-[#e2e2e8] font-['DM_Sans'] text-[11px] font-medium transition-colors cursor-pointer text-center flex items-center justify-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-xs text-[#c3f400]">swap_horiz</span>
+                  <span>Switch Account / PNR</span>
+                </button>
+              </div>
+            ) : (
+              <div className="flex flex-col gap-2">
+                <p className="font-['DM_Sans'] text-[11px] text-[#c4c9ac] leading-tight">
+                  Sign in or look up your booking PNR to view your flight manifest and digital passes.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onOpenLogin();
+                    onCloseMobile();
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-[#c3f400] text-[#161e00] font-['DM_Sans'] text-xs font-bold uppercase tracking-wider hover:opacity-90 transition-all cursor-pointer shadow-[0_0_12px_rgba(195,244,0,0.25)] flex items-center justify-center gap-1.5"
+                >
+                  <span className="material-symbols-outlined text-sm font-bold">login</span>
+                  <span>Customer Login</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Sync Status / Telemetry Footer */}
           <div className="p-3.5 rounded-xl bg-[#1e2024] border border-[#282a2e] flex flex-col gap-2">
             <div className="flex items-center justify-between text-xs">
               <span className="font-['Space_Mono'] text-[11px] text-[#c4c9ac]">SYNC STATUS</span>

@@ -112,3 +112,23 @@ export interface BalanceSummary {
 export type ViewMode = 'chrono' | 'compact' | 'map';
 
 export type ActiveNavTab = 'command-center' | 'timeline' | 'data-matrix' | 'budget';
+
+export interface CustomerUser {
+  id: string;
+  name: string;
+  email: string;
+  handle: string;
+  avatar?: string;
+  membershipTier: 'GUEST' | 'EXPEDITION ELITE' | 'NAVIGATOR BLACK';
+  memberNumber: string;
+  loyaltyPoints: number;
+  passportCountry?: string;
+  linkedPnrs: string[];
+  isLoggedIn: boolean;
+}
+
+export interface AuthResponse {
+  user: CustomerUser;
+  token?: string;
+  message: string;
+}

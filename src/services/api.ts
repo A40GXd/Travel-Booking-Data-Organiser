@@ -1,5 +1,5 @@
-import { ItineraryEvent, ExpenseItem, ReadinessItem } from '../types';
-import { INITIAL_EVENTS, INITIAL_EXPENSES, INITIAL_READINESS } from '../data/initialData';
+import { ItineraryEvent, ExpenseItem, ReadinessItem, CustomerUser } from '../types';
+import { INITIAL_EVENTS, INITIAL_EXPENSES, INITIAL_READINESS, DEFAULT_CUSTOMER_USER } from '../data/initialData';
 
 // When deployed on Vercel, BASE_URL is empty ('') so calls use same-site relative '/api' routes
 const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
@@ -8,6 +8,7 @@ const BASE_URL = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 const STORAGE_EVENTS_KEY = 'wanderlore_events_v2';
 const STORAGE_EXPENSES_KEY = 'wanderlore_expenses_v2';
 const STORAGE_READINESS_KEY = 'wanderlore_readiness_v2';
+const STORAGE_USER_KEY = 'wanderlore_customer_session_v2';
 
 function getLocalEvents(): ItineraryEvent[] {
   try {
@@ -286,5 +287,162 @@ export const apiService = {
       // quiet
     }
     return updated;
+  },
+
+  async getCurrentUser(): Promise<CustomerUser> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/me`, { signal: AbortSignal.timeout(2500) });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(data.user));
+          return data.user;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend user check fallback', e);
+    }
+
+    try {
+      const raw = localStorage.getItem(STORAGE_USER_KEY);
+      if (raw) return JSON.parse(raw);
+    } catch {
+      // fallback
+    }
+    return DEFAULT_CUSTOMER_USER;
+  },
+
+  async loginCustomer(email: string, password: string): Promise<CustomerUser> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(data.user));
+          return data.user;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend login fallback to local session', e);
+    }
+
+    // Client-side fallback session
+    const username = email.split('@')[0];
+    const user: CustomerUser = {
+      id: `cust-${Date.now()}`,
+      name: username ? username.charAt(0).toUpperCase() + username.slice(1) : 'Traveler',
+      email: email.includes('@') ? email : `${email}@wanderlore.io`,
+      handle: `@${username.toLowerCase()}`,
+      avatar: email.includes('mira') ? DEFAULT_CUSTOMER_USER.avatar : undefined,
+      membershipTier: email.includes('kenji') ? 'NAVIGATOR BLACK' : 'EXPEDITION ELITE',
+      memberNumber: `WL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      loyaltyPoints: 34200,
+      passportCountry: 'USA',
+      linkedPnrs: ['W82KLP', 'TK-9921', 'TC-8812'],
+      isLoggedIn: true,
+    };
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+    return user;
+  },
+
+  async loginViaPNR(pnr: string, lastName: string): Promise<CustomerUser> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/pnr-login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pnr, last_name: lastName }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(data.user));
+          return data.user;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend PNR login fallback', e);
+    }
+
+    const cleanPnr = pnr.trim().toUpperCase();
+    const cleanSurname = lastName.trim();
+    const guestUser: CustomerUser = {
+      id: `guest-${Date.now()}`,
+      name: `${cleanSurname} (Guest)`,
+      email: `${cleanSurname.toLowerCase()}@booking.guest`,
+      handle: `@${cleanPnr}`,
+      membershipTier: 'GUEST',
+      memberNumber: `PNR-${cleanPnr}`,
+      loyaltyPoints: 1200,
+      passportCountry: 'VERIFIED',
+      linkedPnrs: [cleanPnr],
+      isLoggedIn: true,
+    };
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(guestUser));
+    return guestUser;
+  },
+
+  async registerCustomer(name: string, email: string, password: string, handle?: string): Promise<CustomerUser> {
+    try {
+      const res = await fetch(`${BASE_URL}/api/auth/register`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, email, password, handle }),
+        signal: AbortSignal.timeout(4000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.user) {
+          localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(data.user));
+          return data.user;
+        }
+      }
+    } catch (e) {
+      console.warn('Backend register fallback', e);
+    }
+
+    const newUser: CustomerUser = {
+      id: `cust-${Date.now()}`,
+      name,
+      email,
+      handle: handle || `@${name.toLowerCase().replace(/\s+/g, '')}`,
+      membershipTier: 'EXPEDITION ELITE',
+      memberNumber: `WL-${Math.random().toString(36).substring(2, 8).toUpperCase()}`,
+      loyaltyPoints: 5000,
+      passportCountry: 'USA',
+      linkedPnrs: ['W82KLP'],
+      isLoggedIn: true,
+    };
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(newUser));
+    return newUser;
+  },
+
+  async logoutCustomer(): Promise<CustomerUser> {
+    try {
+      await fetch(`${BASE_URL}/api/auth/logout`, {
+        method: 'POST',
+        signal: AbortSignal.timeout(2000),
+      });
+    } catch {
+      // quiet
+    }
+    const guest: CustomerUser = {
+      id: 'guest',
+      name: 'Guest Traveler',
+      email: '',
+      handle: '@guest',
+      membershipTier: 'GUEST',
+      memberNumber: 'WL-GUEST',
+      loyaltyPoints: 0,
+      linkedPnrs: [],
+      isLoggedIn: false,
+    };
+    localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(guest));
+    return guest;
   },
 };

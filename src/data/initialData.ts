@@ -1,4 +1,4 @@
-import { ItineraryEvent, ReadinessItem, FlightTelemetry, ExpenseItem } from '../types';
+import { ItineraryEvent, ReadinessItem, FlightTelemetry, ExpenseItem, CustomerUser } from '../types';
 
 export const INITIAL_EVENTS: ItineraryEvent[] = [
   {
@@ -244,5 +244,39 @@ export const INITIAL_EXPENSES: ExpenseItem[] = [
     split_with: ['Mira Vance', 'Leo Tanaka'],
     category: 'Food & Dine',
     date: '2025-10-15',
+  },
+];
+
+export const DEFAULT_CUSTOMER_USER: CustomerUser = {
+  id: 'cust-001',
+  name: 'Mira Vance',
+  email: 'mira@wanderlore.io',
+  handle: '@mira.explores',
+  avatar:
+    'https://lh3.googleusercontent.com/aida-public/AB6AXuD790b-PbyJIxM_-Vlw0NxY_4UtT1l7iQdEsgDlecRumr30nknTdO9InJqKNk5vRd7iVIGSsnqNrpD1ZobztCh-1hWi22i6rZs5bhJOqklUtGRQHnqaWF_p9S4BsY3b3Wc6Ev-rwaXfEyHKDiHML_Sii_rJJZvm-Woo6Plw1xXvoBoz_ukmapOAfLtUmwbGr2klO_dtulVjjRnK_PTR-C5nTEQmcuofavuAN_QRKufySJyVNaF72wWr6Q',
+  membershipTier: 'EXPEDITION ELITE',
+  memberNumber: 'WL-880291',
+  loyaltyPoints: 42500,
+  passportCountry: 'USA',
+  linkedPnrs: ['W82KLP', 'TK-9921', 'TC-8812', 'PASS-TL-5519'],
+  isLoggedIn: true,
+};
+
+export const DEMO_ACCOUNTS = [
+  {
+    name: 'Mira Vance',
+    email: 'mira@wanderlore.io',
+    password: 'TokyoDrift25!',
+    tier: 'EXPEDITION ELITE',
+    role: 'Lead Explorer',
+    pnr: 'W82KLP',
+  },
+  {
+    name: 'Kenji Sato',
+    email: 'kenji@wanderlore.io',
+    password: 'TokyoDrift25!',
+    tier: 'NAVIGATOR BLACK',
+    role: 'Route Ops',
+    pnr: 'TC-8812',
   },
 ];
